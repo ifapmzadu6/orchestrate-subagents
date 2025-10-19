@@ -94,10 +94,10 @@
   },
   "devDependencies": {
     "@types/node": "^20.8.10",
-    "@types/vscode": "^1.93.0",
+    "@types/vscode": "^1.105.0",
+    "@vscode/vsce": "^3.6.0",
     "eslint": "^9.13.0",
-    "typescript": "^5.5.4",
-    "vsce": "^2.15.0"
+    "typescript": "^5.5.4"
   },
   "dependencies": {
     "zod": "^3.23.8"

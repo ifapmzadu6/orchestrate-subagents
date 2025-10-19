@@ -21,7 +21,7 @@ npm install
 npm run compile
 ```
 
-During development, run the “Run Extension” launch configuration from VS Code or execute `code --extensionDevelopmentPath=.`.
+During development, run the “Run Extension” launch configuration from VS Code.
 
 ## Using the Tool in Copilot Chat
 

@@ -76,8 +76,6 @@ The tool response is compact JSON:
 
 ```json
 {
-  "version": 1,
-  "generatedAt": "ISO timestamp",
   "subagents": [
     {
       "id": "string",

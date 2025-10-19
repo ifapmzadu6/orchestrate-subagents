@@ -11,7 +11,7 @@ This VS Code extension adds a language model tool for GitHub Copilot Chat that c
 
 ## Requirements
 
-- VS Code `1.93.0` or newer.
+- VS Code `1.105.0` or newer.
 - GitHub Copilot Chat extension signed in and enabled for language model requests.
 
 ## Setup

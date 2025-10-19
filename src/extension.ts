@@ -250,7 +250,6 @@ class OrchestrateSubagentsTool implements vscode.LanguageModelTool<OrchestratorI
 						accumulatedText = `${accumulatedText}\n\n${combined}`.trim();
 						this.log(`Final summary produced ${combined.trim().length} chars`, agentId);
 					}
-					turns += 1;
 				}
 			} catch (error) {
 				this.log(`Final summary request failed: ${this.toErrorMessage(error)}`, agentId);

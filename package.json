@@ -1,0 +1,105 @@
+{
+  "name": "orchestrate-subagents",
+  "displayName": "Orchestrate Subagents",
+  "publisher": "keisukekarijuku",
+  "description": "Adds a GitHub Copilot Chat tool that can launch multiple parallel subagents with customizable prompts.",
+  "version": "0.0.1",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/keisukekarijuku/vscode-copilot-subagents-tool"
+  },
+  "bugs": {
+    "url": "https://github.com/keisukekarijuku/vscode-copilot-subagents-tool/issues"
+  },
+  "homepage": "https://github.com/keisukekarijuku/vscode-copilot-subagents-tool",
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "languageModelTools": [
+      {
+        "name": "orchestrateSubagents",
+        "toolReferenceName": "orchestrateSubagents",
+        "displayName": "orchestrateSubagents",
+        "modelDescription": "Launch multiple Copilot-like subagents with dedicated system/user prompts, run them in parallel, and return an aggregated summary of their findings.",
+        "userDescription": "Spin up Copilot subagents (each with its own task and instructions) and gather their findings in a single response.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(circuit-board)",
+        "tags": [
+          "copilot",
+          "automation",
+          "research"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "agents"
+          ],
+          "properties": {
+            "agents": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 3,
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "systemPrompt",
+                  "userPrompt"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9._-]+$",
+                    "description": "Identifier used to label the subagent run."
+                  },
+                  "systemPrompt": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "System prompt applied to the Copilot subagent."
+                  },
+                  "userPrompt": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "User prompt sent as the first turn to the subagent."
+                  },
+                  "maxTurns": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 50,
+                    "description": "How many iterative turns the subagent may run."
+                  }
+                }
+              },
+              "description": "Definitions of the subagents to execute."
+            }
+          }
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "lint": "eslint \"src/**/*.ts\""
+  },
+  "devDependencies": {
+    "@types/node": "^20.8.10",
+    "@types/vscode": "^1.93.0",
+    "eslint": "^9.13.0",
+    "typescript": "^5.5.4",
+    "vsce": "^2.15.0"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  }
+}

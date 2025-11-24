@@ -19,8 +19,10 @@ interface SubagentResult {
 	agent: AgentDefinition;
 	turns: number;
 	toolInvocations: number;
+	toolErrors: number;
 	messages: vscode.LanguageModelChatMessage[];
 	accumulatedText: string;
+	error?: string;
 }
 
 class OrchestrateSubagentsTool implements vscode.LanguageModelTool<OrchestratorInput> {
@@ -32,14 +34,14 @@ class OrchestrateSubagentsTool implements vscode.LanguageModelTool<OrchestratorI
 	}
 
 	prepareInvocation(options: vscode.LanguageModelToolInvocationPrepareOptions<OrchestratorInput>): vscode.PreparedToolInvocation {
-		const parsed = OrchestratorInputSchema.safeParse(options.input);
-		if (!parsed.success) {
+		const result = this.parseAndValidateInput(options.input);
+		if (!result.success) {
 			return {
 				invocationMessage: 'Orchestrate Subagents: input looks invalid. Review arguments before continuing.'
 			};
 		}
 
-		const agentCount = parsed.data.agents.length;
+		const agentCount = result.data.agents.length;
 		return {
 			invocationMessage: `Launching ${agentCount} Copilot subagent${agentCount > 1 ? 's' : ''}.`
 		};
@@ -49,17 +51,13 @@ class OrchestrateSubagentsTool implements vscode.LanguageModelTool<OrchestratorI
 		options: vscode.LanguageModelToolInvocationOptions<OrchestratorInput>,
 		token: vscode.CancellationToken
 	): Promise<vscode.LanguageModelToolResult> {
-		const parsed = OrchestratorInputSchema.safeParse(options.input);
-		if (!parsed.success) {
-			const flattened = parsed.error.flatten();
-			const messages = [
-				...flattened.formErrors,
-				...Object.entries(flattened.fieldErrors).flatMap(([field, errors]) => errors?.map((err) => `${field}: ${err}`) ?? [])
-			];
-			const message = `Failed to parse subagent request:\n- ${messages.join('\n- ')}`;
+		const result = this.parseAndValidateInput(options.input);
+		if (!result.success) {
+			const message = `Failed to parse subagent request:\n- ${result.errors.join('\n- ')}`;
 			this.output.appendLine(message);
 			return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(message)]);
 		}
+		const parsed = result;
 
 		const input = parsed.data;
 		const model = await this.resolveModel();
@@ -85,7 +83,23 @@ class OrchestrateSubagentsTool implements vscode.LanguageModelTool<OrchestratorI
 				token
 			)
 		);
-		const results = await Promise.all(tasks);
+		const settledResults = await Promise.allSettled(tasks);
+		const results: SubagentResult[] = settledResults.map((settled, index) => {
+			if (settled.status === 'fulfilled') {
+				return settled.value;
+			}
+			const agent = input.agents[index];
+			this.log(`Agent ${agent.id} failed: ${this.toErrorMessage(settled.reason)}`, agent.id);
+			return {
+				agent: { id: agent.id, systemPrompt: agent.systemPrompt, userPrompt: agent.userPrompt, maxTurns: agent.maxTurns },
+				turns: 0,
+				toolInvocations: 0,
+				toolErrors: 0,
+				messages: [],
+				accumulatedText: '',
+				error: this.toErrorMessage(settled.reason)
+			};
+		});
 
 		const responseJson = this.buildAggregatedResponse(results);
 		this.log('Completed subagents.');
@@ -116,6 +130,7 @@ class OrchestrateSubagentsTool implements vscode.LanguageModelTool<OrchestratorI
 
 		let accumulatedText = '';
 		let toolInvocations = 0;
+		let toolErrors = 0;
 		let turns = 0;
 		let exhaustedTurnBudget = true;
 
@@ -182,6 +197,7 @@ class OrchestrateSubagentsTool implements vscode.LanguageModelTool<OrchestratorI
 				this.log(`Invoking tool ${call.name}`, agentId);
 
 				let result: vscode.LanguageModelToolResult;
+				let toolFailed = false;
 				try {
 					result = await vscode.lm.invokeTool(
 						call.name,
@@ -192,23 +208,30 @@ class OrchestrateSubagentsTool implements vscode.LanguageModelTool<OrchestratorI
 						token
 					);
 				} catch (error) {
-					this.log(`Tool ${call.name} failed: ${this.toErrorMessage(error)}`, agentId);
-					throw error;
+					const errorMessage = this.toErrorMessage(error);
+					this.log(`Tool ${call.name} failed: ${errorMessage}`, agentId);
+					toolErrors += 1;
+					toolFailed = true;
+					result = new vscode.LanguageModelToolResult([
+						new vscode.LanguageModelTextPart(`Tool "${call.name}" failed with error: ${errorMessage}`)
+					]);
 				}
 
 				const resultPart = new vscode.LanguageModelToolResultPart(call.callId, result.content);
 				const toolMessage = vscode.LanguageModelChatMessage.User([resultPart]);
-				try {
-					const tokens = await model.countTokens(toolMessage, token);
-					this.log(
-						`Tool ${call.name} completed (parts=${result.content.length}, approx ${tokens} tokens)`,
-						agentId
-					);
-				} catch (error) {
-					this.log(
-						`Tool ${call.name} completed (parts=${result.content.length}). Token estimation failed: ${this.toErrorMessage(error)}`,
-						agentId
-					);
+				if (!toolFailed) {
+					try {
+						const tokens = await model.countTokens(toolMessage, token);
+						this.log(
+							`Tool ${call.name} completed (parts=${result.content.length}, approx ${tokens} tokens)`,
+							agentId
+						);
+					} catch (error) {
+						this.log(
+							`Tool ${call.name} completed (parts=${result.content.length}). Token estimation failed: ${this.toErrorMessage(error)}`,
+							agentId
+						);
+					}
 				}
 
 				messages.push(toolMessage);
@@ -256,12 +279,13 @@ class OrchestrateSubagentsTool implements vscode.LanguageModelTool<OrchestratorI
 			}
 		}
 
-		this.log(`Finished execution after ${turns} turn(s) and ${toolInvocations} tool call(s)`, agentId);
+		this.log(`Finished execution after ${turns} turn(s), ${toolInvocations} tool call(s), and ${toolErrors} tool error(s)`, agentId);
 
 		return {
 			agent: { id: agentId, systemPrompt, userPrompt, maxTurns },
 			turns,
 			toolInvocations,
+			toolErrors,
 			messages,
 			accumulatedText
 		};
@@ -296,7 +320,9 @@ class OrchestrateSubagentsTool implements vscode.LanguageModelTool<OrchestratorI
 				maxTurns: result.agent.maxTurns,
 				turnsTaken: result.turns,
 				toolCalls: result.toolInvocations,
-				summary: result.accumulatedText
+				toolErrors: result.toolErrors,
+				summary: result.accumulatedText,
+				...(result.error && { error: result.error })
 			}))
 		};
 
@@ -325,14 +351,16 @@ class OrchestrateSubagentsTool implements vscode.LanguageModelTool<OrchestratorI
 		return text
 			.replace(/&/g, '&amp;')
 			.replace(/</g, '&lt;')
-			.replace(/>/g, '&gt;');
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;')
+			.replace(/'/g, '&apos;');
 	}
 
 	private escapeForXmlWithIndent(text: string, indentSpaces: number): string {
 		const indent = ' '.repeat(indentSpaces);
 		return text
 			.split(/\r?\n/)
-			.map((line) => `${indent}${this.escapeForXml(line.trim())}`)
+			.map((line) => `${indent}${this.escapeForXml(line)}`)
 			.join('\n');
 	}
 
@@ -385,6 +413,21 @@ class OrchestrateSubagentsTool implements vscode.LanguageModelTool<OrchestratorI
 			}
 		}
 		return total;
+	}
+
+	private parseAndValidateInput(input: unknown): { success: true; data: OrchestratorInput } | { success: false; errors: string[] } {
+		const parsed = OrchestratorInputSchema.safeParse(input);
+		if (!parsed.success) {
+			const flattened = parsed.error.flatten();
+			const errors = [
+				...flattened.formErrors,
+				...Object.entries(flattened.fieldErrors).flatMap(
+					([field, fieldErrors]) => fieldErrors?.map((err) => `${field}: ${err}`) ?? []
+				)
+			];
+			return { success: false, errors };
+		}
+		return { success: true, data: parsed.data };
 	}
 
 }
